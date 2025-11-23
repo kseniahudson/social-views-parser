@@ -8,21 +8,24 @@ app.use(cors());
 
 function detectPlatform(url) {
   if (url.includes("youtu")) return "youtube";
-  if (url.includes("instagram.com")) return "instagram";
-  if (url.includes("tiktok.com")) return "tiktok";
   if (url.includes("vk.com")) return "vk";
   if (url.includes("t.me")) return "telegram";
-  return "unknown";
+  return "unsupported";
 }
 
 async function extractViews(url) {
   const browser = await puppeteer.launch({
     headless: "new",
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--single-process"
+    ]
   });
 
   const page = await browser.newPage();
-  page.setDefaultNavigationTimeout(60000);
+  page.setDefaultNavigationTimeout(45000); // 45 секунд
 
   try {
     await page.goto(url, { waitUntil: "networkidle2" });
@@ -33,27 +36,6 @@ async function extractViews(url) {
     if (platform === "youtube") {
       try {
         views = await page.$eval("meta[itemprop='interactionCount']", el => el.content);
-      } catch {
-        views = "Не найдено";
-      }
-    }
-
-    if (platform === "instagram") {
-      try {
-        await page.waitForSelector("meta[property='og:description']", { timeout: 5000 });
-        const text = await page.$eval("meta[property='og:description']", el => el.content);
-        const match = text.match(/(\d[\d,.]*) views/);
-        views = match ? match[1].replace(/[,.]/g, "") : "Не найдено";
-      } catch {
-        views = "Не найдено";
-      }
-    }
-
-    if (platform === "tiktok") {
-      try {
-        await page.waitForSelector("strong[data-e2e='video-views']", { timeout: 5000 });
-        const text = await page.$eval("strong[data-e2e='video-views']", el => el.textContent);
-        views = text.replace(/\D/g, "") || "Не найдено";
       } catch {
         views = "Не найдено";
       }
@@ -79,6 +61,10 @@ async function extractViews(url) {
       }
     }
 
+    if (platform === "unsupported") {
+      views = "Платформа не поддерживается на Free Render";
+    }
+
     await browser.close();
     return views;
 
@@ -94,6 +80,11 @@ app.post("/views", async (req, res) => {
 
   const views = await extractViews(url);
   res.json({ views });
+});
+
+// Добавляем GET-запрос для проверки сервера
+app.get("/views", (req, res) => {
+  res.json({ message: "Сервер работает. Используйте POST с { url: '...' }" });
 });
 
 app.listen(3000, () => console.log("Сервер запущен на порту 3000"));
