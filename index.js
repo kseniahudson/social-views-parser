@@ -1,10 +1,12 @@
 import express from "express";
+import cors from "cors";
 import puppeteer from "puppeteer";
 
 const app = express();
 app.use(express.json());
+app.use(cors());
 
-function detect(url) {
+function detectPlatform(url) {
   if (url.includes("youtu")) return "youtube";
   if (url.includes("instagram.com")) return "instagram";
   if (url.includes("tiktok.com")) return "tiktok";
@@ -20,65 +22,78 @@ async function extractViews(url) {
   });
 
   const page = await browser.newPage();
-  await page.goto(url, { waitUntil: "networkidle0", timeout: 60000 });
+  page.setDefaultNavigationTimeout(60000);
 
-  let views = null;
-  const platform = detect(url);
+  try {
+    await page.goto(url, { waitUntil: "networkidle2" });
 
-  // YOUTUBE
-  if (platform === "youtube") {
-    views = await page.$eval("meta[itemprop='interactionCount']", el => el.getAttribute("content"));
-  }
+    const platform = detectPlatform(url);
+    let views = null;
 
-  // INSTAGRAM
-  if (platform === "instagram") {
-    const elem = await page.$("meta[property='og:description']");
-    if (elem) {
-      const text = await page.evaluate(el => el.content, elem);
-      const match = text.match(/(\d[\d,.]*) views/);
-      views = match ? match[1].replace(/[,.]/g, "") : null;
+    if (platform === "youtube") {
+      try {
+        views = await page.$eval("meta[itemprop='interactionCount']", el => el.content);
+      } catch {
+        views = "Не найдено";
+      }
     }
-  }
 
-  // TIKTOK
-  if (platform === "tiktok") {
-    const elem = await page.$("strong[data-e2e='video-views']");
-    if (elem) {
-      const text = await page.evaluate(el => el.textContent, elem);
-      views = text.replace(/\D/g, "");
+    if (platform === "instagram") {
+      try {
+        await page.waitForSelector("meta[property='og:description']", { timeout: 5000 });
+        const text = await page.$eval("meta[property='og:description']", el => el.content);
+        const match = text.match(/(\d[\d,.]*) views/);
+        views = match ? match[1].replace(/[,.]/g, "") : "Не найдено";
+      } catch {
+        views = "Не найдено";
+      }
     }
-  }
 
-  // VK
-  if (platform === "vk") {
-    const elem = await page.$(".like_views .like_button_count");
-    if (elem) {
-      const text = await page.evaluate(el => el.textContent, elem);
-      views = text.replace(/\D/g, "");
+    if (platform === "tiktok") {
+      try {
+        await page.waitForSelector("strong[data-e2e='video-views']", { timeout: 5000 });
+        const text = await page.$eval("strong[data-e2e='video-views']", el => el.textContent);
+        views = text.replace(/\D/g, "") || "Не найдено";
+      } catch {
+        views = "Не найдено";
+      }
     }
-  }
 
-  // TELEGRAM
-  if (platform === "telegram") {
-    const elem = await page.$(".tgme_widget_message_views");
-    if (elem) {
-      const text = await page.evaluate(el => el.textContent, elem);
-      views = text.replace(/\D/g, "");
+    if (platform === "vk") {
+      try {
+        await page.waitForSelector(".like_views .like_button_count", { timeout: 5000 });
+        const text = await page.$eval(".like_views .like_button_count", el => el.textContent);
+        views = text.replace(/\D/g, "") || "Не найдено";
+      } catch {
+        views = "Не найдено";
+      }
     }
-  }
 
-  await browser.close();
-  return views;
+    if (platform === "telegram") {
+      try {
+        await page.waitForSelector(".tgme_widget_message_views", { timeout: 5000 });
+        const text = await page.$eval(".tgme_widget_message_views", el => el.textContent);
+        views = text.replace(/\D/g, "") || "Не найдено";
+      } catch {
+        views = "Не найдено";
+      }
+    }
+
+    await browser.close();
+    return views;
+
+  } catch (e) {
+    await browser.close();
+    return "Ошибка: " + e.message;
+  }
 }
 
 app.post("/views", async (req, res) => {
-  try {
-    const { url } = req.body;
-    const views = await extractViews(url);
-    res.json({ views });
-  } catch (err) {
-    res.json({ error: err.message });
-  }
+  const { url } = req.body;
+  if (!url) return res.json({ views: "Не указана ссылка" });
+
+  const views = await extractViews(url);
+  res.json({ views });
 });
 
-app.listen(3000, () => console.log("Server started"));
+app.listen(3000, () => console.log("Сервер запущен на порту 3000"));
